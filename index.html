@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>kgrasbox</title>
+    <script src="tailwind"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js"
+        }
+      }
+    </script>
+    <style>
+        ::-webkit-scrollbar { display: none; }
+        body { -ms-overflow-style: none; scrollbar-width: none; background-color: #f3f4f6; }
+        .dropdown-shadow { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        
+        /* New styles for read mode matching screenshot */
+        .read-mode-link { color: #0645ad; text-decoration: none; }
+        .read-mode-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body class="text-gray-800 font-sans antialiased flex justify-center">
+
+<div id="app" class="w-full max-w-md bg-white min-h-screen shadow-2xl flex flex-col relative">
+    
+    <header class="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center z-10 cursor-pointer" @click="navigate('?')">
+        <h1 class="text-xl font-bold tracking-wide">kgrasbox</h1>
+    </header>
+
+    <nav class="flex border-b bg-gray-50" v-if="view !== 'readItem'">
+        <button @click="navigate('?'); currentTab = 'items'; view = 'list'" :class="{'border-b-2 border-blue-600 text-blue-600': currentTab === 'items'}" class="flex-1 py-3 text-sm font-semibold text-gray-500">Items</button>
+        <button @click="navigate('?'); currentTab = 'properties'; view = 'list'" :class="{'border-b-2 border-blue-600 text-blue-600': currentTab === 'properties'}" class="flex-1 py-3 text-sm font-semibold text-gray-500">Properties</button>
+    </nav>
+
+    <main class="flex-1 overflow-y-auto p-4 pb-24">
+
+        <div v-if="view === 'list'">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold">{{ currentTab === 'items' ? 'Items (Q)' : 'Properties (P)' }}</h2>
+                <button @click="createNew" class="bg-blue-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow hover:bg-blue-700 transition">+ Add New</button>
+            </div>
+
+            <div v-if="currentTab === 'items'">
+                <div class="mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs font-bold text-gray-500 uppercase">Search Items</span>
+                        <button @click="isAdvancedSearch = !isAdvancedSearch" class="text-xs text-blue-600 underline">{{ isAdvancedSearch ? 'Simple Search' : 'Advanced Search' }}</button>
+                    </div>
+
+                    <div v-if="!isAdvancedSearch">
+                        <input v-model="simpleSearchQuery" @input="displayedItemsCount = 25" type="text" class="w-full border-gray-300 border p-2 rounded-lg outline-none text-sm" placeholder="Search label or alias...">
+                    </div>
+
+                    <div v-else class="space-y-2">
+                        <div v-for="(cond, idx) in advConditions" :key="idx" class="flex flex-col gap-1 p-2 bg-white border rounded">
+                            <div class="flex justify-between">
+                                <span class="text-xs font-bold text-gray-400">{{ idx > 0 ? 'AND' : 'CONDITION' }}</span>
+                                <button @click="advConditions.splice(idx, 1)" class="text-xs text-red-500 font-bold">Remove</button>
+                            </div>
+                            
+                            <div class="relative">
+                                <input v-model="cond.propSearch" @focus="cond.showProp = true" type="text" class="w-full border-b p-1 outline-none text-sm" placeholder="Property...">
+                                <div v-if="cond.showProp" class="absolute z-20 w-full mt-1 bg-white border rounded-lg dropdown-shadow max-h-40 overflow-y-auto">
+                                    <div v-for="p in filteredProperties(cond.propSearch)" :key="p.id" @click="cond.propId = p.id; cond.propSearch = p.name; cond.showProp = false; cond.valId = null; cond.valSearch = '';" class="p-2 border-b cursor-pointer hover:bg-gray-50 text-sm">
+                                        {{ p.name }}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="relative" v-if="cond.propId">
+                                <template v-if="getPropType(cond.propId) === 'item'">
+                                    <input v-model="cond.valSearch" @focus="cond.showVal = true" type="text" class="w-full border-b p-1 outline-none text-sm" placeholder="Item Value...">
+                                    <div v-if="cond.showVal" class="absolute z-20 w-full mt-1 bg-white border rounded-lg dropdown-shadow max-h-40 overflow-y-auto">
+                                        <div v-for="i in filteredItems(cond.valSearch)" :key="i.id" @click="cond.valId = i.id; cond.valSearch = i.label; cond.showVal = false" class="p-2 border-b cursor-pointer hover:bg-gray-50 text-sm">
+                                            {{ i.label }}
+                                        </div>
+                                    </div>
+                                </template>
+                                <template v-else>
+                                    <input v-model="cond.valSearch" type="text" class="w-full border-b p-1 outline-none text-sm" placeholder="Text Value...">
+                                </template>
+                            </div>
+                        </div>
+                        <button @click="addAdvCondition" class="text-xs text-blue-600 font-bold">+ Add Condition</button>
+                    </div>
+                </div>
+
+                <div v-if="searchResults.length > 0" class="border border-gray-300 rounded-lg overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-100 border-b">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Label</th>
+                                <th class="px-3 py-2 text-left font-semibold text-gray-700">ID</th>
+                                <th class="px-3 py-2 text-center font-semibold text-gray-700">Stmts</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="item in paginatedItems" :key="item.id" @click="navigate('?item=' + item.id)" class="border-b hover:bg-blue-50 cursor-pointer">
+                                <td class="px-3 py-2 text-blue-600 font-medium">{{ item.label || 'Unnamed' }}<div v-if="item.synonym" class="text-xs text-gray-500">{{ item.synonym }}</div></td>
+                                <td class="px-3 py-2 text-gray-500 text-xs">{{ item.id }}</td>
+                                <td class="px-3 py-2 text-center text-gray-600">{{ item.statements.length }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div v-if="searchResults.length === 0" class="text-center text-gray-400 mt-10">No items found.</div>
+                
+                <div v-if="displayedItemsCount < searchResults.length" class="mt-4 text-center">
+                    <button @click="displayedItemsCount += 25" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow hover:bg-blue-700 transition">
+                        Load More
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="currentTab === 'properties'">
+                <div v-if="properties.length > 0" class="border border-gray-300 rounded-lg overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-100 border-b">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Name</th>
+                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Type</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="prop in paginatedProperties" :key="prop.id" @click="editProperty(prop)" class="border-b hover:bg-purple-50 cursor-pointer">
+                                <td class="px-3 py-2 text-purple-600 font-medium">{{ prop.name || 'Unnamed' }}<div class="text-xs text-gray-500">{{ prop.id }}</div></td>
+                                <td class="px-3 py-2"><span class="bg-purple-100 text-purple-800 text-xs px-2 py-1 rounded-md uppercase">{{ prop.type }}</span></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p v-if="properties.length === 0" class="text-center text-gray-400 py-4">No properties found. Create one!</p>
+                
+                <div v-if="displayedPropsCount < properties.length" class="mt-4 text-center">
+                    <button @click="displayedPropsCount += 25" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold shadow hover:bg-blue-700 transition">
+                        Load More
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="view === 'readItem' && activeItemRead">
+            <div class="flex justify-between items-center mb-6">
+                <button @click="navigate('?')" class="text-gray-500 text-sm font-bold flex items-center">← Home</button>
+                <button @click="editItem(activeItemRead)" class="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm font-bold">Edit</button>
+            </div>
+            
+            <div class="mb-6">
+                <h1 class="text-2xl text-gray-900 flex items-baseline gap-2">
+                    <svg class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    {{ activeItemRead.label }} <span class="text-gray-400 text-sm">{{ activeItemRead.id }}</span>
+                </h1>
+                <p class="text-gray-700 text-sm mt-1 ml-7">{{ activeItemRead.synonym }}</p>
+            </div>
+
+            <div class="ml-7 space-y-4">
+                <div v-for="stmt in activeItemRead.statements" :key="stmt.propId" class="mb-2">
+                    <div class="text-sm text-gray-900 font-medium mb-1">{{ getPropName(stmt.propId) }}</div>
+                    <div class="ml-6 flex flex-col space-y-1">
+                        <template v-for="(val, vIdx) in stmt.values" :key="vIdx">
+                            <a v-if="getPropType(stmt.propId) === 'item'" :href="'?item=' + val" @click.prevent="navigate('?item=' + val)" class="read-mode-link text-sm">
+                                {{ getItemLabel(val) }}
+                            </a>
+                            <a v-else-if="getPropType(stmt.propId) === 'url'" :href="val" target="_blank" class="read-mode-link text-sm break-all">
+                                {{ val }}
+                            </a>
+                            <span v-else class="text-gray-800 text-sm">{{ val }}</span>
+                        </template>
+                    </div>
+                </div>
+                <p v-if="!activeItemRead.statements || activeItemRead.statements.length === 0" class="text-sm text-gray-400 italic">No statements.</p>
+            </div>
+        </div>
+
+        <div v-if="view === 'editProperty'">
+            <button @click="view = 'list'" class="text-blue-600 text-sm font-bold mb-4 flex items-center">← Back to List</button>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase">Property Name</label>
+                    <input v-model="activeProperty.name" type="text" class="mt-1 w-full border-gray-300 border p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g., instance of">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase">Data Type</label>
+                    <select v-model="activeProperty.type" class="mt-1 w-full border-gray-300 border p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                        <option value="string">String (Text)</option>
+                        <option value="item">Item (Reference to another Item)</option>
+                        <option value="url">URL (Web Link)</option>
+                    </select>
+                </div>
+                <div class="flex gap-3 pt-6 border-t">
+                    <button @click="saveProperty" class="flex-1 bg-blue-600 text-white p-3 rounded-lg font-bold shadow">Save</button>
+                    <button @click="deleteProperty" v-if="activeProperty._isEdit" class="bg-red-100 text-red-600 px-4 py-3 rounded-lg font-bold">Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="view === 'editItem'">
+            <button @click="navigate('?item=' + activeItem.id)" v-if="activeItem._isEdit" class="text-blue-600 text-sm font-bold mb-4 flex items-center">← Cancel Edit</button>
+            <button @click="view = 'list'" v-else class="text-blue-600 text-sm font-bold mb-4 flex items-center">← Back to List</button>
+            
+            <div class="space-y-4">
+                <div class="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <div class="mb-3">
+                        <label class="block text-xs font-bold text-gray-500 uppercase">Label</label>
+                        <input v-model="activeItem.label" type="text" class="mt-1 w-full border-gray-300 border p-2 rounded-lg outline-none font-bold text-lg" placeholder="e.g., Earth">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase">Synonyms</label>
+                        <input v-model="activeItem.synonym" type="text" class="mt-1 w-full border-gray-300 border p-2 rounded-lg outline-none text-sm" placeholder="e.g., Blue Planet, Terra">
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="font-bold text-gray-700 mb-3 border-b pb-2 flex justify-between items-center">
+                        Statements
+                        
+                    </h3>
+
+                    <div v-for="(stmt, index) in activeItem.statements" :key="stmt._key" class="mb-4 bg-white border border-gray-200 shadow-sm rounded-xl p-3 relative">
+                        <button @click="removeStatement(index)" class="absolute top-2 right-2 text-gray-300 hover:text-red-500">✕</button>
+                        
+                        <div class="mb-3 relative">
+                            <label class="block text-xs font-bold text-purple-600 uppercase mb-1">Property</label>
+                            
+                            <div v-if="stmt.propId" class="flex justify-between items-center bg-purple-50 border border-purple-100 p-2 rounded-lg">
+                                <span class="font-bold text-purple-800 text-sm">{{ getPropName(stmt.propId) }}</span>
+                                <button @click="stmt.propId = null; stmt.search = ''" class="text-xs text-purple-600 underline">Change</button>
+                            </div>
+
+                            <div v-else>
+                                <input v-model="stmt.search" @focus="stmt.showDropdown = true" type="text" class="w-full border-gray-300 border p-2 rounded-lg outline-none text-sm" placeholder="Search property...">
+                                
+                                <div v-if="stmt.showDropdown" class="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg dropdown-shadow max-h-48 overflow-y-auto">
+                                    <div v-for="p in filteredProperties(stmt.search)" :key="p.id" @click="selectPropertyForStmt(stmt, p)" class="p-3 border-b cursor-pointer hover:bg-gray-50 text-sm">
+                                        <span class="font-bold text-purple-700">{{ p.name }}</span> <span class="text-xs text-gray-500 ml-2">({{ p.type }})</span>
+                                    </div>
+                                    <div v-if="stmt.search.trim().length > 0" class="p-3 bg-blue-50 cursor-pointer hover:bg-blue-100 text-sm border-t" @click="stmt.showNewPropForm = true; stmt.showDropdown = false;">
+                                        <span class="text-blue-700 font-bold">+ Create property "{{ stmt.search }}"</span>
+                                    </div>
+                                    <div v-else-if="filteredProperties(stmt.search).length === 0" class="p-3 text-sm text-gray-400">No properties found.</div>
+                                </div>
+
+                                <div v-if="stmt.showNewPropForm" class="mt-2 bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                                    <div class="text-xs font-bold text-blue-800 mb-2">Define New Property</div>
+                                    <select v-model="stmt.newPropType" class="w-full border-gray-300 border p-2 rounded mb-2 text-sm">
+                                        <option value="string">String</option>
+                                        <option value="item">Item</option>
+                                        <option value="url">URL</option>
+                                    </select>
+                                    <div class="flex gap-2">
+                                        <button @click="createInlineProperty(stmt)" class="bg-blue-600 text-white px-3 py-1 text-sm rounded font-bold">Save & Use</button>
+                                        <button @click="stmt.showNewPropForm = false; stmt.showDropdown = true" class="text-gray-500 text-sm">Cancel</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="stmt.propId" class="mt-2 pt-2 border-t">
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-2">Values</label>
+                            
+                            <div class="space-y-2 mb-3">
+                                <div v-for="(val, vIdx) in stmt.values" :key="vIdx" class="flex justify-between items-center bg-gray-50 border border-gray-200 p-2 rounded-lg">
+                                    <span class="font-bold text-gray-800 text-sm">{{ getPropType(stmt.propId) === 'item' ? getItemLabel(val) : val }}</span>
+                                    <button @click="stmt.values.splice(vIdx, 1)" class="text-xs text-red-500 underline font-bold">Remove</button>
+                                </div>
+                            </div>
+
+                            <div class="flex gap-2">
+                                <div class="flex-1">
+                                    <template v-if="getPropType(stmt.propId) === 'string'">
+                                        <input v-model="stmt.draftValue" @keyup.enter="pushValue(stmt)" type="text" class="w-full border-gray-300 border p-2 rounded-lg outline-none text-sm" placeholder="Type text and Add ->">
+                                    </template>
+                                    
+                                    <template v-if="getPropType(stmt.propId) === 'url'">
+                                        <input v-model="stmt.draftValue" @keyup.enter="pushValue(stmt)" type="url" class="w-full border-gray-300 border p-2 rounded-lg outline-none text-sm" placeholder="https://... and Add ->">
+                                    </template>
+
+                                    <template v-if="getPropType(stmt.propId) === 'item'">
+                                        <div class="relative">
+                                            <input v-model="stmt.itemSearch" @focus="stmt.showItemDropdown = true" type="text" class="w-full border-gray-300 border p-2 rounded-lg outline-none text-sm" placeholder="Search item to add...">
+                                            
+                                            <div v-if="stmt.showItemDropdown" class="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg dropdown-shadow max-h-48 overflow-y-auto">
+                                                <div v-for="i in filteredItems(stmt.itemSearch)" :key="i.id" @click="stmt.values.push(i.id); stmt.itemSearch=''; stmt.showItemDropdown=false;" class="p-3 border-b cursor-pointer hover:bg-gray-50 text-sm">
+                                                    <span class="font-bold text-gray-800">{{ i.label }}</span> <span class="text-xs text-gray-500 ml-2">({{ i.id }})</span>
+                                                </div>
+                                                <div v-if="stmt.itemSearch.trim().length > 0" class="p-3 bg-blue-50 cursor-pointer hover:bg-blue-100 text-sm border-t" @click="createInlineItemForValues(stmt)">
+                                                    <span class="text-blue-700 font-bold">+ Create new item "{{ stmt.itemSearch }}"</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <button v-if="getPropType(stmt.propId) !== 'item'" @click="pushValue(stmt)" class="bg-gray-200 text-gray-800 px-3 rounded-lg text-sm font-bold shadow hover:bg-gray-300">Add</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <p v-if="activeItem.statements.length === 0" class="text-sm text-gray-400 italic text-center py-4">No statements added yet.</p>
+                    <button @click="addStatement" class="text-blue-600 text-sm font-bold bg-blue-50 px-2 py-1 rounded">+ Add Statement</button>
+                </div>
+
+                <div class="flex gap-3 pt-6 mt-4 border-t">
+                    <button @click="saveItem" class="flex-1 bg-blue-600 text-white p-3 rounded-lg font-bold shadow">Save Item</button>
+                    <button @click="deleteItem" v-if="activeItem._isEdit" class="bg-red-100 text-red-600 px-4 py-3 rounded-lg font-bold">Delete</button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script type="module">
+    import { createApp, ref, computed, onMounted } from 'vue';
+
+    const DB_NAME = 'LocalWikidataDB';
+    const DB_VERSION = 1;
+
+    const initDB = () => new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('properties')) db.createObjectStore('properties', { keyPath: 'id' });
+            if (!db.objectStoreNames.contains('items')) db.createObjectStore('items', { keyPath: 'id' });
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
+    const dbOp = async (storeName, mode, op, data) => {
+        const db = await initDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(storeName, mode);
+            const store = tx.objectStore(storeName);
+            let req = op === 'getAll' ? store.getAll() : op === 'put' ? store.put(data) : store.delete(data);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    };
+
+    let nextQId = 1;
+    let nextPId = 1;
+
+    const generateId = async (prefix) => {
+        if (prefix === 'Q') {
+            const db = await initDB();
+            const items = await new Promise((resolve, reject) => {
+                const tx = db.transaction('items', 'readonly');
+                const store = tx.objectStore('items');
+                store.getAll().onsuccess = (e) => resolve(e.target.result);
+            });
+            nextQId = Math.max(nextQId, ...items.map(i => parseInt(i.id.slice(1)) || 0)) + 1;
+            return 'Q' + nextQId;
+        } else if (prefix === 'P') {
+            const db = await initDB();
+            const props = await new Promise((resolve, reject) => {
+                const tx = db.transaction('properties', 'readonly');
+                const store = tx.objectStore('properties');
+                store.getAll().onsuccess = (e) => resolve(e.target.result);
+            });
+            nextPId = Math.max(nextPId, ...props.map(p => parseInt(p.id.slice(1)) || 0)) + 1;
+            return 'P' + nextPId;
+        }
+        return prefix + Math.floor(Math.random() * 1000000);
+    };
+
+    createApp({
+        setup() {
+            const currentTab = ref('items');
+            const view = ref('list'); // list, readItem, editProperty, editItem
+            
+            const properties = ref([]);
+            const items = ref([]);
+            const displayedItemsCount = ref(25);
+            const displayedPropsCount = ref(25);
+
+            const activeProperty = ref({});
+            const activeItem = ref({});
+            const activeItemRead = ref(null);
+
+            // Search State
+            const simpleSearchQuery = ref('');
+            const isAdvancedSearch = ref(false);
+            const advConditions = ref([]);
+
+            const addAdvCondition = () => {
+                advConditions.value.push({ propId: null, propSearch: '', showProp: false, valId: null, valSearch: '', showVal: false });
+            };
+
+            const loadData = async () => {
+                properties.value = await dbOp('properties', 'readonly', 'getAll');
+                let rawItems = await dbOp('items', 'readonly', 'getAll');
+                
+                // MIGRATION: Convert old single 'value' to array 'values' so we don't break existing data
+                rawItems = rawItems.map(item => {
+                    item.statements.forEach(s => {
+                        if (s.value !== undefined && !s.values) {
+                            s.values = s.value ? [s.value] : [];
+                            delete s.value;
+                        }
+                    });
+                    return item;
+                });
+                items.value = rawItems;
+                
+                // Init next IDs based on existing data
+                if (items.value.length > 0) {
+                    nextQId = Math.max(...items.value.map(i => parseInt(i.id.slice(1)) || 0)) + 1;
+                }
+                if (properties.value.length > 0) {
+                    nextPId = Math.max(...properties.value.map(p => parseInt(p.id.slice(1)) || 0)) + 1;
+                }
+            };
+
+            // Global Router / Deeplinking
+            const handleRoute = async () => {
+                await loadData();
+                const params = new URLSearchParams(window.location.search);
+                const itemId = params.get('item');
+                if (itemId) {
+                    const item = items.value.find(i => i.id === itemId);
+                    if (item) {
+                        activeItemRead.value = item;
+                        view.value = 'readItem';
+                        return;
+                    }
+                }
+                if (view.value === 'readItem') view.value = 'list';
+            };
+
+            const navigate = (url) => {
+                history.pushState(null, '', url);
+                handleRoute();
+            };
+
+            onMounted(() => {
+                window.addEventListener('popstate', handleRoute);
+                handleRoute();
+            });
+
+            // Global Helpers
+            const getPropName = (id) => properties.value.find(p => p.id === id)?.name || 'Unknown Property';
+            const getPropType = (id) => properties.value.find(p => p.id === id)?.type || 'string';
+            const getItemLabel = (id) => items.value.find(i => i.id === id)?.label || id;
+
+            // Search Logic
+            const searchResults = computed(() => {
+                if (!isAdvancedSearch.value) {
+                    const q = simpleSearchQuery.value.toLowerCase();
+                    if (!q) return items.value;
+                    return items.value.filter(i => (i.label && i.label.toLowerCase().includes(q)) || (i.synonym && i.synonym.toLowerCase().includes(q)));
+                } else {
+                    return items.value.filter(item => {
+                        return advConditions.value.every(cond => {
+                            if (!cond.propId) return true; // skip empty
+                            const stmt = item.statements.find(s => s.propId === cond.propId);
+                            if (!stmt) return false;
+                            
+                            if (getPropType(cond.propId) === 'item') {
+                                if (!cond.valId) return true;
+                                return stmt.values.includes(cond.valId);
+                            } else {
+                                if (!cond.valSearch) return true;
+                                return stmt.values.some(v => v.toLowerCase().includes(cond.valSearch.toLowerCase()));
+                            }
+                        });
+                    });
+                }
+            });
+
+            const paginatedItems = computed(() => {
+                const sorted = searchResults.value.sort((a, b) => {
+                    const numA = parseInt(a.id.slice(1));
+                    const numB = parseInt(b.id.slice(1));
+                    return numA - numB;
+                });
+                return sorted.slice(0, displayedItemsCount.value);
+            });
+
+            const paginatedProperties = computed(() => {
+                return properties.value.slice(0, displayedPropsCount.value);
+            });
+
+            // --- Property Methods (Unchanged) ---
+            const createNew = async () => {
+                if (currentTab.value === 'properties') {
+                    activeProperty.value = { id: await generateId('P'), name: '', type: 'string', _isEdit: false };
+                    view.value = 'editProperty';
+                } else {
+                    activeItem.value = { id: await generateId('Q'), label: '', synonym: '', statements: [], _isEdit: false };
+                    view.value = 'editItem';
+                }
+            };
+            const editProperty = (prop) => { activeProperty.value = { ...prop, _isEdit: true }; view.value = 'editProperty'; };
+            const saveProperty = async () => {
+                if (!activeProperty.value.name.trim()) return alert("Property name required");
+                const propToSave = { id: activeProperty.value.id, name: activeProperty.value.name, type: activeProperty.value.type };
+                await dbOp('properties', 'readwrite', 'put', propToSave);
+                await loadData();
+                view.value = 'list';
+            };
+            const deleteProperty = async () => {
+                if (confirm('Delete this property?')) { await dbOp('properties', 'readwrite', 'delete', activeProperty.value.id); await loadData(); view.value = 'list'; }
+            };
+
+            // --- Item & Statement Methods (Adapted for Array) ---
+            const editItem = (item) => {
+                const statementsWithUIState = item.statements.map(s => ({
+                    ...s,
+                    _key: Math.random().toString(36),
+                    search: getPropName(s.propId),
+                    showDropdown: false,
+                    showNewPropForm: false,
+                    newPropType: 'string',
+                    itemSearch: '',
+                    showItemDropdown: false,
+                    draftValue: '' // For string/url adding
+                }));
+                activeItem.value = { ...item, statements: statementsWithUIState, _isEdit: true };
+                view.value = 'editItem';
+            };
+
+            const saveItem = async () => {
+                if (!activeItem.value.label.trim()) return alert("Item label required");
+                // Clean statements before saving (only save statements that have values)
+                const cleanStatements = activeItem.value.statements
+                    .filter(s => s.propId && s.values.length > 0)
+                    .map(s => ({ propId: s.propId, values: s.values }));
+                
+                const itemToSave = JSON.parse(JSON.stringify({
+  id: activeItem.value.id,
+  label: activeItem.value.label,
+  synonym: activeItem.value.synonym,
+  statements: cleanStatements
+}));
+                await dbOp('items', 'readwrite', 'put', itemToSave);
+                navigate('?item=' + itemToSave.id); // Go to Read Mode after saving
+            };
+
+            const deleteItem = async () => {
+                if (confirm('Delete this item?')) { await dbOp('items', 'readwrite', 'delete', activeItem.value.id); navigate('?'); }
+            };
+
+            const addStatement = () => {
+                activeItem.value.statements.push({
+                    _key: Math.random().toString(36), propId: null, values: [],
+                    search: '', showDropdown: false, showNewPropForm: false, newPropType: 'string',
+                    itemSearch: '', showItemDropdown: false, draftValue: ''
+                });
+            };
+
+            const removeStatement = (index) => { activeItem.value.statements.splice(index, 1); };
+
+            const pushValue = (stmt) => {
+                if(stmt.draftValue.trim()) {
+                    stmt.values.push(stmt.draftValue.trim());
+                    stmt.draftValue = '';
+                }
+            };
+
+            // --- Inline Handlers ---
+            const filteredProperties = (q) => q ? properties.value.filter(p => p.name.toLowerCase().includes(q.toLowerCase())) : properties.value;
+            const filteredItems = (q) => q ? items.value.filter(i => i.label.toLowerCase().includes(q.toLowerCase())) : items.value;
+
+            const selectPropertyForStmt = (stmt, prop) => { stmt.propId = prop.id; stmt.values = []; stmt.showDropdown = false; };
+
+            const createInlineProperty = async (stmt) => {
+                if (!stmt.search.trim()) return;
+                const newProp = { id: await generateId('P'), name: stmt.search.trim(), type: stmt.newPropType };
+                await dbOp('properties', 'readwrite', 'put', newProp);
+                await loadData(); 
+                stmt.propId = newProp.id; stmt.values = []; stmt.showNewPropForm = false;
+            };
+
+            const createInlineItemForValues = async (stmt) => {
+                if (!stmt.itemSearch.trim()) return;
+                const newItem = { id: await generateId('Q'), label: stmt.itemSearch.trim(), synonym: '', statements: [] };
+                await dbOp('items', 'readwrite', 'put', newItem);
+                await loadData();
+                stmt.values.push(newItem.id);
+                stmt.itemSearch = ''; stmt.showItemDropdown = false;
+            };
+
+            // Click outside handler for all dropdowns
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.relative')) {
+                    advConditions.value.forEach(c => { c.showProp = false; c.showVal = false; });
+                    if (activeItem.value.statements) { activeItem.value.statements.forEach(s => { s.showDropdown = false; s.showItemDropdown = false; }); }
+                }
+            });
+
+            return {
+                currentTab, view, properties, items, activeProperty, activeItem, activeItemRead,
+                simpleSearchQuery, isAdvancedSearch, advConditions, searchResults, paginatedItems, displayedItemsCount, 
+                paginatedProperties, displayedPropsCount, addAdvCondition,
+                createNew, editProperty, saveProperty, deleteProperty, editItem, saveItem, deleteItem,
+                addStatement, removeStatement, pushValue, navigate,
+                filteredProperties, selectPropertyForStmt, createInlineProperty,
+                filteredItems, createInlineItemForValues, getPropName, getPropType, getItemLabel
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
