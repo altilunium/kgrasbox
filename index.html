@@ -352,7 +352,7 @@
                 const store = tx.objectStore('items');
                 store.getAll().onsuccess = (e) => resolve(e.target.result);
             });
-            nextQId = Math.max(nextQId, ...items.map(i => parseInt(i.id.slice(1)) || 0)) + 1;
+            let nextQId = Math.max(...items.map(i => parseInt(i.id.slice(1)) || 0)) + 1;
             return 'Q' + nextQId;
         } else if (prefix === 'P') {
             const db = await initDB();
@@ -361,7 +361,7 @@
                 const store = tx.objectStore('properties');
                 store.getAll().onsuccess = (e) => resolve(e.target.result);
             });
-            nextPId = Math.max(nextPId, ...props.map(p => parseInt(p.id.slice(1)) || 0)) + 1;
+            nextPId = Math.max(...props.map(p => parseInt(p.id.slice(1)) || 0)) + 1;
             return 'P' + nextPId;
         }
         return prefix + Math.floor(Math.random() * 1000000);
@@ -540,8 +540,10 @@
                 navigate('?item=' + itemToSave.id); // Go to Read Mode after saving
             };
 
+         
+
             const deleteItem = async () => {
-                if (confirm('Delete this item?')) { await dbOp('items', 'readwrite', 'delete', activeItem.value.id); navigate('?'); }
+                if (confirm('Delete this item?')) { await dbOp('items', 'readwrite', 'delete', activeItem.value.id); await loadData(); view.value = 'list'; }
             };
 
             const addStatement = () => {
